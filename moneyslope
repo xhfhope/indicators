@@ -1,0 +1,611 @@
+//todo make pink line green and sandline red
+// keep other 
+// alt shift r
+// 25% is currently s&p
+
+
+//@version=5
+indicator(title="prop_moneyslope", overlay=false)
+
+XPer = input.int(4, title="X Period 1")
+XPer2 = input.int(70, title="X Period 2")
+YPer = input.int(1, title="Slope Period")
+YPer2 = input.int(1, title="Slope Period 2")
+YYPer = input.int(1, title="Slope of Slope Period")
+YYPer2 = input.int(1, title="Slope of Slope Period 2")
+EMAyn = input.int(1, title="EMA? 1 or 0")
+
+// calculations
+X = (EMAyn > 0) ? ta.ema(close, XPer) : ta.sma(close, XPer)
+X2 = (EMAyn > 0) ? ta.ema(close, XPer2) : ta.sma(close, XPer2)
+YX = (X - X[YPer]) / YPer
+YX2 = (X2 - X2[YPer2]) / YPer2
+XofYX = ta.sma(YX, 10)
+XofYX2 = ta.sma(YX2, 10)
+XofXofYX = ta.sma(XofYX, 3)
+YXofXofYX = (XofXofYX-XofXofYX[YPer2]) / YPer2
+YXofYX = ((XofYX-XofYX[YYPer]) / YYPer) * 10
+YXofYX2 = ((XofYX2-XofYX2[YYPer2]) / YYPer2) * 10
+XofYXofYX = ta.sma(YXofYX, 10)
+XofYXofYX2 = ta.sma(YXofYX2, 10)
+
+// main plot calculations
+mainplot = ((XofYX2 * 10) / math.max(math.abs(ta.highest(XofYX2 * 10, 50)), math.abs(ta.lowest(XofYX2 * 10, 50)))) * 10
+pperiod = 100
+macdplot = (ta.ema(close, 12) - ta.ema(close, 26)) / math.max(math.abs(ta.highest(ta.ema(close, 12) - ta.ema(close, 26), pperiod)), math.abs(ta.lowest(ta.ema(close, 12) - ta.ema(close, 26), pperiod))) * 10
+midplot = ((XofXofYX * 4) / math.max(math.abs(ta.highest(XofXofYX * 4, 50)), math.abs(ta.lowest(XofXofYX * 4, 50)))) * 10
+minorplot = ((YXofYX2 * 10) / math.max(math.abs(ta.highest(YXofYX2 * 10, 50)), math.abs(ta.lowest(YXofYX2 * 10, 50)))) * 10
+
+// weights
+line_in_sand_level = 4
+aggressive_level = 7.25
+mainplot_weight = 3.5
+mainplot_slope_weight = 0.42
+midplot_weight = 0.63
+midplot_slope_weight = 1.26
+positive_macd_weight = 1.05
+minor_over_mid_weight = 0.77
+above_50sma_weight = 0.25
+above_100sma_weight = 0.25
+above_200sma_weight = 2.5
+mid_above_total_modifier = 1.25
+
+// points calculation
+mainplot_points = mainplot > 0 ? math.min(mainplot / 10 * mainplot_weight, mainplot_weight) : 0
+mainplot_slope_points = mainplot - nz(mainplot[1]) > 0 ? mainplot_slope_weight : 0
+midplot_points = midplot > 0 ? midplot / 10 * midplot_weight : 0
+midplot_slope_points = midplot - nz(midplot[1]) > 0 ? midplot_slope_weight : 0
+macd_slope_points = macdplot - nz(macdplot[1]) > 0 ? positive_macd_weight : 0
+minor_vs_mid_points = minorplot > midplot ? minor_over_mid_weight : 0
+above_50sma_points = close > ta.sma(close, 50) ? above_50sma_weight : 0
+above_100sma_points = close > ta.sma(close, 100) ? above_100sma_weight : 0
+above_200sma_points = close > ta.sma(close, 200) ? above_200sma_weight : 0
+total_points = mainplot_points + mainplot_slope_points + midplot_points + midplot_slope_points + macd_slope_points + minor_vs_mid_points + above_50sma_points + above_100sma_points + above_200sma_points
+
+mid_above_total = midplot > ta.ema(total_points, 30) ? total_points * mid_above_total_modifier : total_points
+
+/// plotting
+plot(0, color=color.new(#BA68C8, 0), linewidth=1)
+plot(line_in_sand_level, color=#ff101066, linewidth=1)
+//plot(mainplot, color=color.rgb(119, 179, 207, 23), linewidth=2)
+plot(aggressive_level, color=color.new(#c585f1, 50), linewidth=2)
+plot(macdplot, color=color.blue)
+plot(midplot, color=color.new(#39665e, 60), linewidth=2)
+//plot(minorplot, color=color.new(#434651, 0), linewidth=1)
+//plot(total_points, color=color.new(#c0e5e2, 20), linewidth=2)
+//plot(ta.sma(total_points, 10), color=color.new(#babe80, 0), linewidth=2)
+plot(ta.ema(total_points, 30), color=#85f18a, linewidth=2)
+//experiment with sma values then create bottom indicator off of mid_above_total < 9
+//plot(ta.sma(mid_above_total, 5), color=#acab9962, linewidth=1)
+
+
+
+
+
+
+
+
+
+
+//START OVERBOUGHT TECH
+autoTip = "(100, 0) = Auto Calculate Levels"
+
+tf = input.timeframe("", "Calculations Time Frame                                ")
+ticker = input.symbol("", "Ticker ID")
+src = input.source(close, "Source", inline = "calc")
+len = input.int(14, "                    Length", 1, inline = "calc")
+hybColor = input.color(color.black, "Hybrid Overbought/Oversold Graph →", inline = "hyb")
+hideHyb = input.bool(true, "Hide", inline = "hyb")
+obManual = input.int(100, "Alert Levels → OB:", inline = "alert")
+osManual = input.int(0, "OS:", tooltip = autoTip, inline = "alert")
+alertFreq = input.string("Bar Level", "Alerts", ["Bar Level", "Touches Level", "Bar Passed"])
+showSignal = input.bool(true, "Background Color Signals →", inline = "signal")
+callColor = input.color(color.teal, "Call:", inline = "signal")
+putColor = input.color(color.maroon, "Put:", inline = "signal")
+weakSignal = input.bool(true, "Color Weaker Signals        →", inline = "weakSignal")
+callWeakColor = input.color(color.green, "Call:", inline = "weakSignal")
+putWeakColor = input.color(color.red, "Put:", inline = "weakSignal")
+drawOBS = input.bool(true, "Draw OB/OS Levels      ", inline = "levels")
+showOBSLabels = input.bool(true, "Show Level Labels", tooltip = "In order to make this option work for individual oscillators, 'Hide' option for each of the following technicals should be unchecked.", inline = "levels")
+
+techGroup = "=====[ Technicals to Apply in Hybrid Calculations ]====="
+useB = input.bool(true, "Bollinger Bands %B", inline = "bUse", group = techGroup)
+bColor = input.color(color.gray, "                            →", inline = "bUse", group = techGroup)
+hideB = input.bool(true, "Hide", inline = "bUse", group = techGroup)
+bOBManual = input.int(100, "      Levels → OB:", inline = "bLevels", group = techGroup)
+bOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "bLevels", group = techGroup)
+useCci = input.bool(true, "Commodity Channel Index (CCI)", inline = "cciUse", group = techGroup)
+cciColor = input.color(color.aqua, "       →", inline = "cciUse", group = techGroup)
+hideCci = input.bool(true, "Hide", inline = "cciUse", group = techGroup)
+cciOBManual = input.int(100, "      Levels → OB:", inline = "cciLevels", group = techGroup)
+cciOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "cciLevels", group = techGroup)
+useCmf = input.bool(true, "Chaikin Money Flow (CMF)", inline = "cmfUse", group = techGroup)
+cmfColor = input.color(color.blue, "               →", inline = "cmfUse", group = techGroup)
+hideCmf = input.bool(true, "Hide", inline = "cmfUse", group = techGroup)
+cmfOBManual = input.int(100, "      Levels → OB:", inline = "cmfLevels", group = techGroup)
+cmfOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "cmfLevels", group = techGroup)
+useCmo = input.bool(true, "Chande Momentum Oscillator (CMO)", inline = "cmoUse", group = techGroup)
+cmoColor = input.color(color.navy, "→", inline = "cmoUse", group = techGroup)
+hideCmo = input.bool(true, "Hide", inline = "cmoUse", group = techGroup)
+cmoOBManual = input.int(100, "      Levels → OB:", inline = "cmoLevels", group = techGroup)
+cmoOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "cmoLevels", group = techGroup)
+useDix = input.bool(true, "Disparity Index (DIX)", inline = "dixUse", group = techGroup)
+dixColor = input.color(color.teal, "                        →", inline = "dixUse", group = techGroup)
+hideDix = input.bool(true, "Hide", inline = "dixUse", group = techGroup)
+dixOBManual = input.int(100, "      Levels → OB:", inline = "dixLevels", group = techGroup)
+dixOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "dixLevels", group = techGroup)
+useK = input.bool(true, "Keltner Channel %K", inline = "kUse", group = techGroup)
+kColor = input.color(color.green, "                          →", inline = "kUse", group = techGroup)
+hideK = input.bool(true, "Hide", inline = "kUse", group = techGroup)
+kOBManual = input.int(100, "      Levels → OB:", inline = "kLevels", group = techGroup)
+kOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "kLevels", group = techGroup)
+useMfi = input.bool(true, "Money Flow Index (MFI)", inline = "mfiUse", group = techGroup)
+mfiColor = input.color(color.olive, "                   →", inline = "mfiUse", group = techGroup)
+hideMfi = input.bool(true, "Hide", inline = "mfiUse", group = techGroup)
+mfiOBManual = input.int(100, "      Levels → OB:", inline = "mfiLevels", group = techGroup)
+mfiOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "mfiLevels", group = techGroup)
+useRoc = input.bool(true, "Rate Of Change (ROC / Momentum)", inline = "rocUse", group = techGroup)
+rocColor = input.color(color.purple, " →", inline = "rocUse", group = techGroup)
+hideRoc = input.bool(true, "Hide", inline = "rocUse", group = techGroup)
+rocOBManual = input.int(100, "      Levels → OB:", inline = "rocLevels", group = techGroup)
+rocOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "rocLevels", group = techGroup)
+useRsi = input.bool(true, "Relative Strength Index (RSI)", inline = "rsiUse", group = techGroup)
+rsiColor = input.color(color.fuchsia, "           →", inline = "rsiUse", group = techGroup)
+hideRsi = input.bool(true, "Hide", inline = "rsiUse", group = techGroup)
+rsiOBManual = input.int(100, "      Levels → OB:", inline = "rsiLevels", group = techGroup)
+rsiOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "rsiLevels", group = techGroup)
+useRvi = input.bool(true, "Relative Vigor Index (RVI / RVGI)", inline = "rviUse", group = techGroup)
+rviColor = input.color(color.maroon, "     →", inline = "rviUse", group = techGroup)
+hideRvi = input.bool(true, "Hide", inline = "rviUse", group = techGroup)
+rviOBManual = input.int(100, "      Levels → OB:", inline = "rviLevels", group = techGroup)
+rviOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "rviLevels", group = techGroup)
+useSto = input.bool(true, "Stochastic (William's %R)", inline = "stoUse", group = techGroup)
+stoColor = input.color(color.red, "                  →", inline = "stoUse", group = techGroup)
+hideSto = input.bool(true, "Hide", inline = "stoUse", group = techGroup)
+stoOBManual = input.int(100, "      Levels → OB:", inline = "stoLevels", group = techGroup)
+stoOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "stoLevels", group = techGroup)
+useTmf = input.bool(true, "Twiggs Money Flow (TMF)", inline = "tmfUse", group = techGroup)
+tmfColor = input.color(color.orange, "                →", inline = "tmfUse", group = techGroup)
+hideTmf = input.bool(true, "Hide", inline = "tmfUse", group = techGroup)
+tmfOBManual = input.int(100, "      Levels → OB:", inline = "tmfLevels", group = techGroup)
+tmfOSManual = input.int(0, "OS:", tooltip = autoTip, inline = "tmfLevels", group = techGroup)
+
+alertFrequency = alertFreq == "Every Time A Bar Touches An OB/OS Level" ? alert.freq_all : alertFreq == "When A Bar Closes While Passed An OB/OS Level" ? alert.freq_once_per_bar_close : alert.freq_once_per_bar
+maxArraySize = 100000
+oscCount = 0
+
+var bOBSum = array.new_int(), var bOSSum = array.new_int()
+var cciOBSum = array.new_int(), var cciOSSum = array.new_int()
+var cmfOBSum = array.new_int(), var cmfOSSum = array.new_int()
+var cmoOBSum = array.new_int(), var cmoOSSum = array.new_int()
+var dixOBSum = array.new_int(), var dixOSSum = array.new_int()
+var kOBSum = array.new_int(), var kOSSum = array.new_int()
+var mfiOBSum = array.new_int(), var mfiOSSum = array.new_int()
+var rocOBSum = array.new_int(), var rocOSSum = array.new_int()
+var rsiOBSum = array.new_int(), var rsiOSSum = array.new_int()
+var rviOBSum = array.new_int(), var rviOSSum = array.new_int()
+var stoOBSum = array.new_int(), var stoOSSum = array.new_int()
+var tmfOBSum = array.new_int(), var tmfOSSum = array.new_int()
+if bOBSum.size() == maxArraySize
+    bOBSum.shift()
+if cciOBSum.size() == maxArraySize
+    cciOBSum.shift()
+if cmfOBSum.size() == maxArraySize
+    cmfOBSum.shift()
+if cmoOBSum.size() == maxArraySize
+    cmoOBSum.shift()
+if dixOBSum.size() == maxArraySize
+    dixOBSum.shift()
+if kOBSum.size() == maxArraySize
+    kOBSum.shift()
+if mfiOBSum.size() == maxArraySize
+    mfiOBSum.shift()
+if rocOBSum.size() == maxArraySize
+    rocOBSum.shift()
+if rsiOBSum.size() == maxArraySize
+    rsiOBSum.shift()
+if rviOBSum.size() == maxArraySize
+    rviOBSum.shift()
+if stoOBSum.size() == maxArraySize
+    stoOBSum.shift()
+if tmfOBSum.size() == maxArraySize
+    tmfOBSum.shift()
+if bOSSum.size() == maxArraySize
+    bOSSum.shift()
+if cciOSSum.size() == maxArraySize
+    cciOSSum.shift()
+if cmfOSSum.size() == maxArraySize
+    cmfOSSum.shift()
+if cmoOSSum.size() == maxArraySize
+    cmoOSSum.shift()
+if dixOSSum.size() == maxArraySize
+    dixOSSum.shift()
+if kOSSum.size() == maxArraySize
+    kOSSum.shift()
+if mfiOSSum.size() == maxArraySize
+    mfiOSSum.shift()
+if rocOSSum.size() == maxArraySize
+    rocOSSum.shift()
+if rsiOSSum.size() == maxArraySize
+    rsiOSSum.shift()
+if rviOSSum.size() == maxArraySize
+    rviOSSum.shift()
+if stoOSSum.size() == maxArraySize
+    stoOSSum.shift()
+if tmfOSSum.size() == maxArraySize
+    tmfOSSum.shift()
+
+var hybOBSum = array.new_int()
+var hybOSSum = array.new_int()
+if hybOBSum.size() == maxArraySize
+    hybOBSum.shift()
+if hybOSSum.size() == maxArraySize
+    hybOSSum.shift()
+
+[bar, o, c] = request.security(ticker, tf, [bar_index, open, close])
+
+//}
+// functions {
+
+showAlert(message, price, t, freq) =>
+    alert(message + "\n" + ticker + "\n" + str.format_time(t, "MM-dd, HH:mm", "Asia/Tehran") + "\n@ " + str.tostring(price), freq)
+
+drawHLine(y, c) =>
+    line.new(bar_index[1], y, bar_index, y, extend = extend.both, style = line.style_dotted, color = c)
+
+normal(s, min, max) =>
+    var hMin = 1e11
+    var hMax = -1e11
+    hMin := math.min(nz(s, hMin), hMin)
+    hMax := math.max(nz(s, hMax), hMax)
+    min + (max - min) * (s - hMin) / math.max(hMax - hMin, 0)
+
+graphs(src, len) =>
+    b = normal((src - ta.sma(src, len) + ta.stdev(src, len)) / (2 * ta.stdev(src, len)), 0, 100)
+    cci = normal(ta.cci(src, len), 0, 100)
+    cmf = normal(math.sum((high == low) ? 0 : volume * (2 * src - low - high) / (high - low), len) / math.sum(volume, len), 0, 100)
+    cmo = (ta.cmo(src, len) + 100) / 2
+    dix = normal((((src - ta.sma(src, len)) / ta.sma(src, len) * 100) + 1) * 50, 0, 100)
+    k = normal((src - (ta.ema(src, len) - ta.atr(len))) / (2 * ta.atr(len)), 0, 100)
+    mfi = ta.mfi(src, len)
+    roc = normal(ta.roc(src, len), 0, 100)
+    rsi = ta.rsi(src, len)
+    rvi = ((math.sum(ta.swma(close - open), len) / math.sum(ta.swma(high - low), len)) + 1) * 50
+    sto = ta.stoch(src, high, low, len)
+    tmf = normal(ta.ema((((src - math.min(low, src[1])) - (math.max(high, src[1]) - src)) / (math.max(high, src[1]) - math.min(low, src[1]))) * volume, len) / ta.ema(volume, len), 0, 100)
+    [b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf]
+
+levels(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf) =>
+    if bar != bar[1] and c < o and c[1] > o[1] and
+     (na(b) ? true : b[1] > 50) and
+     (na(cci) ? true : cci[1] > 50) and
+     (na(cmf) ? true : cmf[1] > 50) and
+     (na(cmo) ? true : cmo[1] > 50) and
+     (na(dix) ? true : dix[1] > 50) and
+     (na(k) ? true : k[1] > 50) and
+     (na(mfi) ? true : mfi[1] > 50) and
+     (na(roc) ? true : roc[1] > 50) and
+     (na(rsi) ? true : rsi[1] > 50) and
+     (na(rvi) ? true : rvi[1] > 50) and
+     (na(sto) ? true : sto[1] > 50) and
+     (na(tmf) ? true : tmf[1] > 50)
+        bOBSum.push(math.ceil(b[1]))
+        cciOBSum.push(math.ceil(cci[1]))
+        cmfOBSum.push(math.ceil(cmf[1]))
+        cmoOBSum.push(math.ceil(cmo[1]))
+        dixOBSum.push(math.ceil(dix[1]))
+        kOBSum.push(math.ceil(k[1]))
+        mfiOBSum.push(math.ceil(mfi[1]))
+        rocOBSum.push(math.ceil(roc[1]))
+        rsiOBSum.push(math.ceil(rsi[1]))
+        rviOBSum.push(math.ceil(rvi[1]))
+        stoOBSum.push(math.ceil(sto[1]))
+        tmfOBSum.push(math.ceil(tmf[1]))
+    if bar != bar[1] and c > o and c[1] < o[1] and
+     (na(b) ? true : b[1] < 50) and
+     (na(cci) ? true : cci[1] < 50) and
+     (na(cmf) ? true : cmf[1] < 50) and
+     (na(cmo) ? true : cmo[1] < 50) and
+     (na(dix) ? true : dix[1] < 50) and
+     (na(k) ? true : k[1] < 50) and
+     (na(mfi) ? true : mfi[1] < 50) and
+     (na(roc) ? true : roc[1] < 50) and
+     (na(rsi) ? true : rsi[1] < 50) and
+     (na(rvi) ? true : rvi[1] < 50) and
+     (na(sto) ? true : sto[1] < 50) and
+     (na(tmf) ? true : tmf[1] < 50)
+        bOSSum.push(math.floor(b[1]))
+        cciOSSum.push(math.floor(cci[1]))
+        cmfOSSum.push(math.floor(cmf[1]))
+        cmoOSSum.push(math.floor(cmo[1]))
+        dixOSSum.push(math.floor(dix[1]))
+        kOSSum.push(math.floor(k[1]))
+        mfiOSSum.push(math.floor(mfi[1]))
+        rocOSSum.push(math.floor(roc[1]))
+        rsiOSSum.push(math.floor(rsi[1]))
+        rviOSSum.push(math.floor(rvi[1]))
+        stoOSSum.push(math.floor(sto[1]))
+        tmfOSSum.push(math.floor(tmf[1]))
+    bOB = math.ceil(bOBSum.avg()), bOS = math.floor(bOSSum.avg())
+    cciOB = math.ceil(cciOBSum.avg()), cciOS = math.floor(cciOSSum.avg())
+    cmfOB = math.ceil(cmfOBSum.avg()), cmfOS = math.floor(cmfOSSum.avg())
+    cmoOB = math.ceil(cmoOBSum.avg()), cmoOS = math.floor(cmoOSSum.avg())
+    dixOB = math.ceil(dixOBSum.avg()), dixOS = math.floor(dixOSSum.avg())
+    kOB = math.ceil(kOBSum.avg()), kOS = math.floor(kOSSum.avg())
+    mfiOB = math.ceil(mfiOBSum.avg()), mfiOS = math.floor(mfiOSSum.avg())
+    rocOB = math.ceil(rocOBSum.avg()), rocOS = math.floor(rocOSSum.avg())
+    rsiOB = math.ceil(rsiOBSum.avg()), rsiOS = math.floor(rsiOSSum.avg())
+    rviOB = math.ceil(rviOBSum.avg()), rviOS = math.floor(rviOSSum.avg())
+    stoOB = math.ceil(stoOBSum.avg()), stoOS = math.floor(stoOSSum.avg())
+    tmfOB = math.ceil(tmfOBSum.avg()), tmfOS = math.floor(tmfOSSum.avg())
+    [bOB, bOS, cciOB, cciOS, cmfOB, cmfOS, cmoOB, cmoOS, dixOB, dixOS, kOB, kOS, mfiOB, mfiOS, rocOB, rocOS, rsiOB, rsiOS, rviOB, rviOS, stoOB, stoOS, tmfOB, tmfOS]
+
+hybLevels(hyb) =>
+    if bar != bar[1] and c < o and c[1] > o[1] and hyb[1] > 50
+        hybOBSum.push(math.ceil(hyb[1]))
+    if bar != bar[1] and c > o and c[1] < o[1] and hyb[1] < 50
+        hybOSSum.push(math.floor(hyb[1]))
+    [math.ceil(array.avg(hybOBSum)), math.floor(array.avg(hybOSSum))]
+
+ob(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOB, cciOB, cmfOB, cmoOB, dixOB, kOB, mfiOB, rocOB, rsiOB, rviOB, stoOB, tmfOB) =>
+    percent = 100.
+    bit = 100 / oscCount
+    if useB and b <= bOB
+        percent -= bit
+    if useCci and cci <= cciOB
+        percent -= bit
+    if useCmf and cmf <= cmfOB
+        percent -= bit
+    if useCmo and cmo <= cmoOB
+        percent -= bit
+    if useDix and dix <= dixOB
+        percent -= bit
+    if useK and k <= kOB
+        percent -= bit
+    if useMfi and mfi <= mfiOB
+        percent -= bit
+    if useRoc and roc <= rocOB
+        percent -= bit
+    if useRsi and rsi <= rsiOB
+        percent -= bit
+    if useRvi and rvi <= rviOB
+        percent -= bit
+    if useSto and sto <= stoOB
+        percent -= bit
+    if useTmf and tmf <= tmfOB
+        percent -= bit
+    percent
+
+os(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOS, cciOS, cmfOS, cmoOS, dixOS, kOS, mfiOS, rocOS, rsiOS, rviOS, stoOS, tmfOS) =>
+    percent = 100.
+    bit = 100 / oscCount
+    if useB and b >= bOS
+        percent -= bit
+    if useCci and cci >= cciOS
+        percent -= bit
+    if useCmf and cmf >= cmfOS
+        percent -= bit
+    if useCmo and cmo >= cmoOS
+        percent -= bit
+    if useDix and dix >= dixOS
+        percent -= bit
+    if useK and k >= kOS
+        percent -= bit
+    if useMfi and mfi >= mfiOS
+        percent -= bit
+    if useRoc and roc >= rocOS
+        percent -= bit
+    if useRsi and rsi >= rsiOS
+        percent -= bit
+    if useRvi and rvi >= rviOS
+        percent -= bit
+    if useSto and sto >= stoOS
+        percent -= bit
+    if useTmf and tmf >= tmfOS
+        percent -= bit
+    percent
+
+//}
+// calculate oscillators, ob/os levels & hybrid graph {
+
+[b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf] = request.security(ticker, tf, graphs(src, len))
+
+if useB and not na(b)
+    oscCount += 1
+if useCci and not na(cci)
+    oscCount += 1
+if useCmf and not na(cmf)
+    oscCount += 1
+if useCmo and not na(cmo)
+    oscCount += 1
+if useDix and not na(dix)
+    oscCount += 1
+if useK and not na(k)
+    oscCount += 1
+if useMfi and not na(mfi)
+    oscCount += 1
+if useRoc and not na(roc)
+    oscCount += 1
+if useRsi and not na(rsi)
+    oscCount += 1
+if useRvi and not na(rvi)
+    oscCount += 1
+if useSto and not na(sto)
+    oscCount += 1
+if useTmf and not na(tmf)
+    oscCount += 1
+
+[bOBAuto, bOSAuto, cciOBAuto, cciOSAuto, cmfOBAuto, cmfOSAuto, cmoOBAuto, cmoOSAuto, dixOBAuto, dixOSAuto, kOBAuto, kOSAuto, mfiOBAuto, mfiOSAuto, rocOBAuto, rocOSAuto, rsiOBAuto, rsiOSAuto, rviOBAuto, rviOSAuto, stoOBAuto, stoOSAuto, tmfOBAuto, tmfOSAuto] =
+ levels(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf)
+
+bOB = bOBManual == 100 ? bOBAuto : bOBManual
+bOS = bOSManual == 0 ? bOSAuto : bOSManual
+cciOB = cciOBManual == 100 ? cciOBAuto : cciOBManual
+cciOS = cciOSManual == 0 ? cciOSAuto : cciOSManual
+cmfOB = cmfOBManual == 100 ? cmfOBAuto : cmfOBManual
+cmfOS = cmfOSManual == 0 ? cmfOSAuto : cmfOSManual
+cmoOB = cmoOBManual == 100 ? cmoOBAuto : cmoOBManual
+cmoOS = cmoOSManual == 0 ? cmoOSAuto : cmoOSManual
+dixOB = dixOBManual == 100 ? dixOBAuto : dixOBManual
+dixOS = dixOSManual == 0 ? dixOSAuto : dixOSManual
+kOB = kOBManual == 100 ? kOBAuto : kOBManual
+kOS = kOSManual == 0 ? kOSAuto : kOSManual
+mfiOB = mfiOBManual == 100 ? mfiOBAuto : mfiOBManual
+mfiOS = mfiOSManual == 0 ? mfiOSAuto : mfiOSManual
+rocOB = rocOBManual == 100 ? rocOBAuto : rocOBManual
+rocOS = rocOSManual == 0 ? rocOSAuto : rocOSManual
+rsiOB = rsiOBManual == 100 ? rsiOBAuto : rsiOBManual
+rsiOS = rsiOSManual == 0 ? rsiOSAuto : rsiOSManual
+rviOB = rviOBManual == 100 ? rviOBAuto : rviOBManual
+rviOS = rviOSManual == 0 ? rviOSAuto : rviOSManual
+stoOB = stoOBManual == 100 ? stoOBAuto : stoOBManual
+stoOS = stoOSManual == 0 ? stoOSAuto : stoOSManual
+tmfOB = tmfOBManual == 100 ? tmfOBAuto : tmfOBManual
+tmfOS = tmfOSManual == 0 ? tmfOSAuto : tmfOSManual
+
+hybrid = (ob(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOB, cciOB, cmfOB, cmoOB, dixOB, kOB, mfiOB, rocOB, rsiOB, rviOB, stoOB, tmfOB) - os(b, cci, cmf, cmo, dix, k, mfi, roc, rsi, rvi, sto, tmf, bOS, cciOS, cmfOS, cmoOS, dixOS, kOS, mfiOS, rocOS, rsiOS, rviOS, stoOS, tmfOS) + 100) / 2
+[hybOBAuto, hybOSAuto] = hybLevels(hybrid)
+hybOB = obManual == 100 ? hybOBAuto : obManual
+hybOS = osManual == 0 ? hybOSAuto : osManual
+
+//}
+// show oscillators ob/os labels {
+
+if showOBSLabels
+    if not hideHyb
+        hybObL = label.new(bar_index + 15, hybOB, str.tostring(hybOB), color = color.new(putWeakColor, 70), style = label.style_label_left, tooltip = "Hybrid OB Level")
+        hybOsL = label.new(bar_index + 15, hybOS, str.tostring(hybOS), color = color.new(callWeakColor, 70), style = label.style_label_left, tooltip = "Hybrid OS Level")
+        label.delete(hybObL[1])
+        label.delete(hybOsL[1])
+    y = 100 - (50 / oscCount)
+    if useB and not hideB and not na(b)
+        bL = label.new(bar_index + 2, y, str.tostring(bOB) + " ; " + str.tostring(bOS), color = bColor, style = label.style_label_left, textcolor = color.white, tooltip = "%B OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(bL[1])
+    if useCci and not hideCci and not na(cci)
+        cciL = label.new(bar_index + 2, y, str.tostring(cciOB) + " ; " + str.tostring(cciOS), color = cciColor, style = label.style_label_left, textcolor = color.white, tooltip = "CCI OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(cciL[1])
+    if useCmf and not hideCmf and not na(cmf)
+        cmfL = label.new(bar_index + 2, y, str.tostring(cmfOB) + " ; " + str.tostring(cmfOS), color = cmfColor, style = label.style_label_left, textcolor = color.white, tooltip = "CMF OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(cmfL[1])
+    if useCmo and not hideCmo and not na(cmo)
+        cmoL = label.new(bar_index + 2, y, str.tostring(cmoOB) + " ; " + str.tostring(cmoOS), color = cmoColor, style = label.style_label_left, textcolor = color.white, tooltip = "CMO OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(cmoL[1])
+    if useDix and not hideDix and not na(dix)
+        dixL = label.new(bar_index + 2, y, str.tostring(dixOB) + " ; " + str.tostring(dixOS), color = dixColor, style = label.style_label_left, textcolor = color.white, tooltip = "DIX OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(dixL[1])
+    if useK and not hideK and not na(k)
+        kL = label.new(bar_index + 2, y, str.tostring(kOB) + " ; " + str.tostring(kOS), color = kColor, style = label.style_label_left, textcolor = color.white, tooltip = "%K OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(kL[1])
+    if useMfi and not hideMfi and not na(mfi)
+        mfiL = label.new(bar_index + 2, y, str.tostring(mfiOB) + " ; " + str.tostring(mfiOS), color = mfiColor, style = label.style_label_left, textcolor = color.white, tooltip = "MFI OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(mfiL[1])
+    if useRoc and not hideRoc and not na(roc)
+        rocL = label.new(bar_index + 2, y, str.tostring(rocOB) + " ; " + str.tostring(rocOS), color = rocColor, style = label.style_label_left, textcolor = color.white, tooltip = "ROC OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(rocL[1])
+    if useRsi and not hideRsi and not na(rsi)
+        rsiL = label.new(bar_index + 2, y, str.tostring(rsiOB) + " ; " + str.tostring(rsiOS), color = rsiColor, style = label.style_label_left, textcolor = color.white, tooltip = "RSI OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(rsiL[1])
+    if useRvi and not hideRvi and not na(rvi)
+        rviL = label.new(bar_index + 2, y, str.tostring(rviOB) + " ; " + str.tostring(rviOS), color = rviColor, style = label.style_label_left, textcolor = color.white, tooltip = "RVI OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(rviL[1])
+    if useSto and not hideSto and not na(sto)
+        stoL = label.new(bar_index + 2, y, str.tostring(stoOB) + " ; " + str.tostring(stoOS), color = stoColor, style = label.style_label_left, textcolor = color.white, tooltip = "%R OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(stoL[1])
+    if useTmf and not hideTmf and not na(tmf)
+        tmfL = label.new(bar_index + 2, y, str.tostring(tmfOB) + " ; " + str.tostring(tmfOS), color = tmfColor, style = label.style_label_left, textcolor = color.white, tooltip = "TMF OB & OS Levels")
+        y := y - (100 / oscCount)
+        label.delete(tmfL[1])
+
+//}
+// show oscillators & ob/os levels {
+
+plot(hideB ? na : b, color = bColor)
+plot(hideCci ? na : cci, color = cciColor)
+plot(hideCmf ? na : cmf, color = cmfColor)
+plot(hideCmo ? na : cmo, color = cmoColor)
+plot(hideDix ? na : dix, color = dixColor)
+plot(hideK ? na : k, color = kColor)
+plot(hideMfi ? na : mfi, color = mfiColor)
+plot(hideRoc ? na : roc, color = rocColor)
+plot(hideRsi ? na : rsi, color = rsiColor)
+plot(hideRvi ? na : rvi, color = rviColor)
+plot(hideSto ? na : sto, color = stoColor)
+plot(hideTmf ? na : tmf, color = tmfColor)
+plot(hideHyb ? na : hybrid, "Hybrid", linewidth = 2, color = hybColor)
+if drawOBS
+    if not hideB
+        drawHLine(bOB, bColor)
+        drawHLine(bOS, bColor)
+    if not hideCci
+        drawHLine(cciOB, cciColor)
+        drawHLine(cciOS, cciColor)
+    if not hideCmf
+        drawHLine(cmfOB, cmfColor)
+        drawHLine(cmfOS, cmfColor)
+    if not hideCmo
+        drawHLine(cmoOB, cmoColor)
+        drawHLine(cmoOS, cmoColor)
+    if not hideDix
+        drawHLine(dixOB, dixColor)
+        drawHLine(dixOS, dixColor)
+    if not hideK
+        drawHLine(kOB, kColor)
+        drawHLine(kOS, kColor)
+    if not hideMfi
+        drawHLine(mfiOB, mfiColor)
+        drawHLine(mfiOS, mfiColor)
+    if not hideRoc
+        drawHLine(rocOB, rocColor)
+        drawHLine(rocOS, rocColor)
+    if not hideRsi
+        drawHLine(rsiOB, rsiColor)
+        drawHLine(rsiOS, rsiColor)
+    if not hideRvi
+        drawHLine(rviOB, rviColor)
+        drawHLine(rviOS, rviColor)
+    if not hideSto
+        drawHLine(stoOB, stoColor)
+        drawHLine(stoOS, stoColor)
+    if not hideTmf
+        drawHLine(tmfOB, tmfColor)
+        drawHLine(tmfOS, tmfColor)
+    drawHLine(0, hybColor)
+    drawHLine(50, hybColor)
+    drawHLine(100, hybColor)
+    if not hideHyb
+        drawHLine(hybOB, putWeakColor)
+        drawHLine(hybOS, callWeakColor)
+
+//}
+// signals & alerts {
+
+bgcolor(weakSignal and hybrid < 50 and hybrid > 0 ? color.new(callWeakColor, 92) : na)
+bgcolor(weakSignal and hybrid < 50 / math.phi and hybrid > 0 ? color.new(callWeakColor, 88) : na)
+bgcolor(weakSignal and hybrid < 50 / math.phi / math.phi and hybrid > 0 ? color.new(callWeakColor, 81) : na)
+bgcolor(weakSignal and hybrid < 50 / math.phi / math.phi / math.phi and hybrid > 0 ? color.new(callWeakColor, 69) : na)
+bgcolor(weakSignal and hybrid < 50 / math.phi / math.phi / math.phi / math.phi and hybrid > 0 ? callWeakColor : na)
+//bgcolor(showSignal and hybrid == 0 ? callColor : na)
+//bgcolor(weakSignal and hybrid > 50 and hybrid < 100 ? color.new(putWeakColor, 85) : na)
+//bgcolor(weakSignal and hybrid > 100 - (50 / math.phi) and hybrid < 100 ? color.new(putWeakColor, 76) : na)
+//bgcolor(weakSignal and hybrid > 100 - (50 / math.phi / math.phi) and hybrid < 100 ? color.new(putWeakColor, 62) : na)
+//bgcolor(weakSignal and hybrid > 100 - (50 / math.phi / math.phi / math.phi) and hybrid < 100 ? color.new(putWeakColor, 38) : na)
+//bgcolor(weakSignal and hybrid > 100 - (50 / math.phi / math.phi / math.phi / math.phi) and hybrid < 100 ? putWeakColor : na)
+//bgcolor(showSignal and hybrid == 100 ? putColor : na)
+
+up = hybrid <= hybOS
+down = hybrid >= hybOB
+if up or down
+    showAlert(up ? "Buy ↑" : "Sell ↓", close, time, alertFrequency)
+
+//}
