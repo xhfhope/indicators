@@ -36,32 +36,48 @@ macdplot = (ta.ema(close, 12) - ta.ema(close, 26)) / math.max(math.abs(ta.highes
 midplot = ((XofXofYX * 4) / math.max(math.abs(ta.highest(XofXofYX * 4, 50)), math.abs(ta.lowest(XofXofYX * 4, 50)))) * 10
 minorplot = ((YXofYX2 * 10) / math.max(math.abs(ta.highest(YXofYX2 * 10, 50)), math.abs(ta.lowest(YXofYX2 * 10, 50)))) * 10
 
-// weights
-line_in_sand_level = 4
-aggressive_level = 7.25
-mainplot_weight = 3.5
-mainplot_slope_weight = 0.42
-midplot_weight = 0.63
-midplot_slope_weight = 1.26
-positive_macd_weight = 1.05
-minor_over_mid_weight = 0.77
-above_50sma_weight = 0.25
-above_100sma_weight = 0.25
-above_200sma_weight = 2.5
-mid_above_total_modifier = 1.25
+// ===== POINTS SYSTEM =====
+// Composite momentum scoring system that combines 9 bullish conditions
+// Score Range: 0 (bearish) to ~10.63 (maximum bullish)
+// Key Thresholds:
+//   - 4.0 (line_in_sand_level): Minimum bullish bias
+//   - 7.25 (aggressive_level): Strong bullish signal
+// Each condition below is weighted by importance and contributes to total_points
 
-// points calculation
-mainplot_points = mainplot > 0 ? math.min(mainplot / 10 * mainplot_weight, mainplot_weight) : 0
-mainplot_slope_points = mainplot - nz(mainplot[1]) > 0 ? mainplot_slope_weight : 0
-midplot_points = midplot > 0 ? midplot / 10 * midplot_weight : 0
-midplot_slope_points = midplot - nz(midplot[1]) > 0 ? midplot_slope_weight : 0
-macd_slope_points = macdplot - nz(macdplot[1]) > 0 ? positive_macd_weight : 0
-minor_vs_mid_points = minorplot > midplot ? minor_over_mid_weight : 0
-above_50sma_points = close > ta.sma(close, 50) ? above_50sma_weight : 0
-above_100sma_points = close > ta.sma(close, 100) ? above_100sma_weight : 0
-above_200sma_points = close > ta.sma(close, 200) ? above_200sma_weight : 0
+// weights (ranked by importance)
+line_in_sand_level = 4                    // Minimum bullish threshold
+aggressive_level = 7.25                   // Strong bullish threshold
+mainplot_weight = 3.5                     // #1 - Short-term momentum strength (scaled 0-3.5)
+mainplot_slope_weight = 0.42              // #7 - Mainplot increasing? (binary: 0.42 or 0)
+midplot_weight = 0.63                     // #6 - Mid-term momentum strength (scaled 0-0.63)
+midplot_slope_weight = 1.26               // #3 - Midplot increasing? (binary: 1.26 or 0)
+positive_macd_weight = 1.05               // #4 - MACD increasing? (binary: 1.05 or 0)
+minor_over_mid_weight = 0.77              // #5 - Minor > Mid? (binary: 0.77 or 0)
+above_50sma_weight = 0.25                 // #8 - Price above 50 SMA (binary: 0.25 or 0)
+above_100sma_weight = 0.25                // #9 - Price above 100 SMA (binary: 0.25 or 0)
+above_200sma_weight = 2.5                 // #2 - Price above 200 SMA (binary: 2.5 or 0) - Long-term trend
+mid_above_total_modifier = 1.25           // Multiplier when midplot > EMA(total_points, 30)
+
+// points calculation - each condition awards 0 to its maximum weight
+mainplot_points = mainplot > 0 ? math.min(mainplot / 10 * mainplot_weight, mainplot_weight) : 0              // Scaled: mainplot strength * 3.5
+mainplot_slope_points = mainplot - nz(mainplot[1]) > 0 ? mainplot_slope_weight : 0                            // Binary: 0.42 if mainplot rising
+midplot_points = midplot > 0 ? midplot / 10 * midplot_weight : 0                                              // Scaled: midplot strength * 0.63
+midplot_slope_points = midplot - nz(midplot[1]) > 0 ? midplot_slope_weight : 0                                // Binary: 1.26 if midplot rising
+macd_slope_points = macdplot - nz(macdplot[1]) > 0 ? positive_macd_weight : 0                                 // Binary: 1.05 if MACD rising
+minor_vs_mid_points = minorplot > midplot ? minor_over_mid_weight : 0                                         // Binary: 0.77 if minor > mid
+above_50sma_points = close > ta.sma(close, 50) ? above_50sma_weight : 0                                       // Binary: 0.25 if above 50 SMA
+above_100sma_points = close > ta.sma(close, 100) ? above_100sma_weight : 0                                    // Binary: 0.25 if above 100 SMA
+above_200sma_points = close > ta.sma(close, 200) ? above_200sma_weight : 0                                    // Binary: 2.5 if above 200 SMA
+
+// Total composite score - sum of all 9 components
+// Maximum possible: 3.5 + 0.42 + 0.63 + 1.26 + 1.05 + 0.77 + 0.25 + 0.25 + 2.5 = 10.63 points
 total_points = mainplot_points + mainplot_slope_points + midplot_points + midplot_slope_points + macd_slope_points + minor_vs_mid_points + above_50sma_points + above_100sma_points + above_200sma_points
 
+// Slope of total_points - measures rate of change in momentum score
+total_points_slope = total_points - nz(total_points[1])                                                                 // Raw slope (change from previous bar)
+total_points_slope_normalized = (total_points_slope * 10) / math.max(math.abs(ta.highest(total_points_slope * 10, 50)), math.abs(ta.lowest(total_points_slope * 10, 50))) * 10  // Normalized to -10 to +10 range
+
+// Boost modifier - increases total_points by 25% when midplot exceeds its 30-period EMA trend
 mid_above_total = midplot > ta.ema(total_points, 30) ? total_points * mid_above_total_modifier : total_points
 
 /// plotting
@@ -75,6 +91,7 @@ plot(midplot, color=color.new(#39665e, 60), linewidth=2)
 //plot(total_points, color=color.new(#c0e5e2, 20), linewidth=2)
 //plot(ta.sma(total_points, 10), color=color.new(#babe80, 0), linewidth=2)
 plot(ta.ema(total_points, 30), color=#85f18a, linewidth=2)
+plot(total_points_slope_normalized, color=color.new(#ff9800, 0), linewidth=2, title="Total Points Slope")
 //experiment with sma values then create bottom indicator off of mid_above_total < 9
 //plot(ta.sma(mid_above_total, 5), color=#acab9962, linewidth=1)
 
