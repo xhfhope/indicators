@@ -36,6 +36,89 @@ macdplot = (ta.ema(close, 12) - ta.ema(close, 26)) / math.max(math.abs(ta.highes
 midplot = ((XofXofYX * 4) / math.max(math.abs(ta.highest(XofXofYX * 4, 50)), math.abs(ta.lowest(XofXofYX * 4, 50)))) * 10
 minorplot = ((YXofYX2 * 10) / math.max(math.abs(ta.highest(YXofYX2 * 10, 50)), math.abs(ta.lowest(YXofYX2 * 10, 50)))) * 10
 
+// ===== DIVERGENCE DETECTION =====
+// Catches when price momentum diverges from indicator momentum (early reversal warning)
+lookback = 50
+price_high = ta.highest(high, lookback)
+price_low = ta.lowest(low, lookback)
+mainplot_high = ta.highest(mainplot, lookback)
+mainplot_low = ta.lowest(mainplot, lookback)
+
+// Bearish divergence: price at/near highs but mainplot weakening
+bearish_divergence = high >= price_high * 0.98 and mainplot < mainplot_high * 0.85
+// Bullish divergence: price at/near lows but mainplot strengthening
+bullish_divergence = low <= price_low * 1.02 and mainplot > mainplot_low * 1.15
+
+divergence_adjustment = bullish_divergence ? 2.0 : bearish_divergence ? -3.0 : 0.0
+
+// ===== REGIME FILTER =====
+// Detects trending vs ranging markets (trend-following signals fail in chop)
+// Method: Measure separation between 50 SMA and 200 SMA
+sma_50 = ta.sma(close, 50)
+sma_200 = ta.sma(close, 200)
+sma_separation_pct = math.abs((sma_50 - sma_200) / close) * 100
+
+// Strong trend: SMAs separated by >5% | Ranging: SMAs separated by <2%
+is_trending = sma_separation_pct > 5.0
+is_ranging = sma_separation_pct < 2.0
+regime_multiplier = is_ranging ? 0.6 : 1.0  // 40% penalty in choppy markets
+
+// ===== VOLATILITY FILTER =====
+// High volatility = unreliable signals (whipsaws, news spikes, crashes)
+atr = ta.atr(14)                           // 14-period Average True Range
+atr_avg = ta.sma(atr, 50)                  // 50-period average of ATR
+volatility_ratio = atr / atr_avg           // Current volatility vs average
+
+// Normal volatility: <= 2.0x | High volatility: > 2.0x | Extreme: > 3.0x
+// Relaxed thresholds to avoid penalizing legitimate strong trending moves
+is_high_volatility = volatility_ratio > 2.0
+is_extreme_volatility = volatility_ratio > 3.0
+volatility_multiplier = is_extreme_volatility ? 0.7 : is_high_volatility ? 0.85 : 1.0
+
+// ===== MULTI-TIMEFRAME CONFIRMATION =====
+// Checks if higher timeframe (daily) agrees with current timeframe signals
+// Prevents counter-trend trades (e.g., bullish on 1H while daily is bearish)
+htf_close = request.security(syminfo.tickerid, "D", close)
+htf_ema_50 = request.security(syminfo.tickerid, "D", ta.ema(close, 50))
+htf_close_prev = request.security(syminfo.tickerid, "D", close[1])
+
+// HTF is bullish if: price above 50 EMA AND rising
+htf_bullish = htf_close > htf_ema_50 and htf_close > htf_close_prev
+// HTF is bearish if: price below 50 EMA OR falling
+htf_bearish = htf_close < htf_ema_50 or htf_close < htf_close_prev
+
+// Current timeframe bullish if mainplot positive
+current_bullish = mainplot > 0
+
+// MTF alignment scoring
+mtf_adjustment = current_bullish and htf_bullish ? 1.5 : current_bullish and htf_bearish ? -2.0 : 0.0
+
+// ===== MOMENTUM EXHAUSTION DETECTION =====
+// Catches overextended conditions (blow-off tops, capitulation bottoms)
+rsi_current = ta.rsi(close, 14)
+
+// Overbought exhaustion: momentum at unsustainable extremes
+is_overbought_extreme = mainplot > 8 or rsi_current > 80
+is_extremely_overbought = mainplot > 9 and rsi_current > 85
+
+// Oversold capitulation: extreme oversold with bullish reversal signal
+is_oversold_capitulation = mainplot < -8 and rsi_current < 20 and current_bullish
+
+// Exhaustion adjustment
+exhaustion_adjustment = is_extremely_overbought ? -3.0 : is_overbought_extreme ? -2.0 : is_oversold_capitulation ? 1.0 : 0.0
+
+// ===== MONEY FLOW INDEX (MFI) INTEGRATION =====
+// MFI = volume-weighted RSI, measures money flowing in/out
+mfi_current = ta.mfi(close, 14)
+
+// MFI scoring: scaled based on money flow strength
+// MFI > 50 = money flowing in (bullish) | MFI < 50 = money flowing out (bearish)
+mfi_adjustment = current_bullish ? (mfi_current - 50) / 50 * 1.5 : 0.0  // Only apply to bullish signals, scaled -1.5 to +1.5
+
+// ===== RATE OF CHANGE ACCELERATION =====
+// Slope is calculated for display/reference only - NOT used in scoring to avoid circular feedback loop
+// Removed from score calculation to prevent oscillation and lag issues
+
 // ===== POINTS SYSTEM =====
 // Composite momentum scoring system that combines 9 bullish conditions
 // Score Range: 0 (bearish) to ~10.63 (maximum bullish)
@@ -58,24 +141,45 @@ above_100sma_weight = 0.25                // #9 - Price above 100 SMA (binary: 0
 above_200sma_weight = 2.5                 // #2 - Price above 200 SMA (binary: 2.5 or 0) - Long-term trend
 mid_above_total_modifier = 1.25           // Multiplier when midplot > EMA(total_points, 30)
 
+// volume conviction multiplier - modulates momentum components based on volume
+volume_factor = math.min(volume / ta.sma(volume, 20), 2.0)                                                    // Volume relative to 20-SMA, capped at 2.0x
+
 // points calculation - each condition awards 0 to its maximum weight
-mainplot_points = mainplot > 0 ? math.min(mainplot / 10 * mainplot_weight, mainplot_weight) : 0              // Scaled: mainplot strength * 3.5
-mainplot_slope_points = mainplot - nz(mainplot[1]) > 0 ? mainplot_slope_weight : 0                            // Binary: 0.42 if mainplot rising
-midplot_points = midplot > 0 ? midplot / 10 * midplot_weight : 0                                              // Scaled: midplot strength * 0.63
-midplot_slope_points = midplot - nz(midplot[1]) > 0 ? midplot_slope_weight : 0                                // Binary: 1.26 if midplot rising
-macd_slope_points = macdplot - nz(macdplot[1]) > 0 ? positive_macd_weight : 0                                 // Binary: 1.05 if MACD rising
-minor_vs_mid_points = minorplot > midplot ? minor_over_mid_weight : 0                                         // Binary: 0.77 if minor > mid
-above_50sma_points = close > ta.sma(close, 50) ? above_50sma_weight : 0                                       // Binary: 0.25 if above 50 SMA
-above_100sma_points = close > ta.sma(close, 100) ? above_100sma_weight : 0                                    // Binary: 0.25 if above 100 SMA
-above_200sma_points = close > ta.sma(close, 200) ? above_200sma_weight : 0                                    // Binary: 2.5 if above 200 SMA
+mainplot_points_raw = mainplot > 0 ? math.min(mainplot / 10 * mainplot_weight, mainplot_weight) : 0           // Scaled: mainplot strength * 3.5
+mainplot_points = mainplot_points_raw * volume_factor                                                          // Apply volume multiplier
+mainplot_slope_points_raw = mainplot - nz(mainplot[1]) > 0 ? mainplot_slope_weight : 0                        // Binary: 0.42 if mainplot rising
+mainplot_slope_points = mainplot_slope_points_raw * volume_factor                                              // Apply volume multiplier
+midplot_points_raw = midplot > 0 ? midplot / 10 * midplot_weight : 0                                          // Scaled: midplot strength * 0.63
+midplot_points = midplot_points_raw * volume_factor                                                            // Apply volume multiplier
+midplot_slope_points_raw = midplot - nz(midplot[1]) > 0 ? midplot_slope_weight : 0                            // Binary: 1.26 if midplot rising
+midplot_slope_points = midplot_slope_points_raw * volume_factor                                                // Apply volume multiplier
+macd_slope_points_raw = macdplot - nz(macdplot[1]) > 0 ? positive_macd_weight : 0                             // Binary: 1.05 if MACD rising
+macd_slope_points = macd_slope_points_raw * volume_factor                                                      // Apply volume multiplier
+minor_vs_mid_points_raw = minorplot > midplot ? minor_over_mid_weight : 0                                     // Binary: 0.77 if minor > mid
+minor_vs_mid_points = minor_vs_mid_points_raw * volume_factor                                                  // Apply volume multiplier
+above_50sma_points = close > ta.sma(close, 50) ? above_50sma_weight : 0                                       // Binary: 0.25 if above 50 SMA (no volume factor)
+above_100sma_points = close > ta.sma(close, 100) ? above_100sma_weight : 0                                    // Binary: 0.25 if above 100 SMA (no volume factor)
+above_200sma_points = close > ta.sma(close, 200) ? above_200sma_weight : 0                                    // Binary: 2.5 if above 200 SMA (no volume factor)
 
-// Total composite score - sum of all 9 components
-// Maximum possible: 3.5 + 0.42 + 0.63 + 1.26 + 1.05 + 0.77 + 0.25 + 0.25 + 2.5 = 10.63 points
-total_points = mainplot_points + mainplot_slope_points + midplot_points + midplot_slope_points + macd_slope_points + minor_vs_mid_points + above_50sma_points + above_100sma_points + above_200sma_points
+// Total composite score - sum of all 9 components (volume modulates 6 of them: all momentum-based)
+// Then apply all adjustments and filters
+total_points_base = mainplot_points + mainplot_slope_points + midplot_points + midplot_slope_points + macd_slope_points + minor_vs_mid_points + above_50sma_points + above_100sma_points + above_200sma_points
+total_points_with_divergence = total_points_base + divergence_adjustment  // Add divergence bonus/penalty (-3 to +2)
+total_points_with_mtf = total_points_with_divergence + mtf_adjustment     // Add MTF alignment bonus/penalty (-2 to +1.5)
+total_points_with_mfi = total_points_with_mtf + mfi_adjustment            // Add MFI adjustment (-1.5 to +1.5)
+total_points_with_exhaustion = total_points_with_mfi + exhaustion_adjustment  // Add exhaustion penalty/bonus (-3 to +1)
+total_points_with_regime = total_points_with_exhaustion * regime_multiplier   // Apply regime filter (0.6x in ranging markets)
+total_points = total_points_with_regime * volatility_multiplier               // Apply volatility filter (0.7x to 1.0x) - FINAL SCORE
 
-// Slope of total_points - measures rate of change in momentum score
+// Calculate slope for display/reference only (NOT used in scoring to avoid circular feedback)
 total_points_slope = total_points - nz(total_points[1])                                                                 // Raw slope (change from previous bar)
 total_points_slope_normalized = (total_points_slope * 10) / math.max(math.abs(ta.highest(total_points_slope * 10, 50)), math.abs(ta.lowest(total_points_slope * 10, 50))) * 10  // Normalized to -10 to +10 range
+total_points_slope_sma = ta.sma(total_points_slope_normalized, 3)                                                       // 3-period SMA smoothing
+
+// Score ranges with all modifiers:
+// Baseline (1x volume, no div, trending, normal vol, no adjustments): 10.63 max
+// Worst case (all negative factors stacked): ~0.7 min (improved from 0.5)
+// Best case (all positive factors aligned): ~19 max (down from 20+ due to no acceleration bonus)
 
 // Boost modifier - increases total_points by 25% when midplot exceeds its 30-period EMA trend
 mid_above_total = midplot > ta.ema(total_points, 30) ? total_points * mid_above_total_modifier : total_points
@@ -85,13 +189,13 @@ plot(0, color=color.new(#BA68C8, 0), linewidth=1)
 plot(line_in_sand_level, color=#ff101066, linewidth=1)
 //plot(mainplot, color=color.rgb(119, 179, 207, 23), linewidth=2)
 plot(aggressive_level, color=color.new(#c585f1, 50), linewidth=2)
-plot(macdplot, color=color.blue)
-plot(midplot, color=color.new(#39665e, 60), linewidth=2)
+//plot(macdplot, color=color.blue)
+//plot(midplot, color=color.new(#39665e, 60), linewidth=2)
 //plot(minorplot, color=color.new(#434651, 0), linewidth=1)
 //plot(total_points, color=color.new(#c0e5e2, 20), linewidth=2)
 //plot(ta.sma(total_points, 10), color=color.new(#babe80, 0), linewidth=2)
 plot(ta.ema(total_points, 30), color=#85f18a, linewidth=2)
-plot(total_points_slope_normalized, color=color.new(#ff9800, 0), linewidth=2, title="Total Points Slope")
+//plot(total_points_slope_sma, color=color.new(#ff9800, 0), linewidth=2, title="Total Points Slope (SMA 3)")
 //experiment with sma values then create bottom indicator off of mid_above_total < 9
 //plot(ta.sma(mid_above_total, 5), color=#acab9962, linewidth=1)
 
